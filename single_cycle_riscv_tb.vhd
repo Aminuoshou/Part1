@@ -22,7 +22,7 @@ BEGIN
 
     clk_process : PROCESS
     BEGIN
-        FOR i IN 0 TO 3 LOOP
+        FOR i IN 0 TO 7 LOOP
             clock <= '0';
             WAIT FOR 1 ns;
             clock <= '1';

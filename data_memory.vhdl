@@ -71,13 +71,19 @@ BEGIN
     PROCESS (clock)
     BEGIN
         IF rising_edge(clock) THEN
-            -- TODO: implement byte-wise write operation
-            -- Write 32-bit word to memory in little-endian byte order 
+            IF write_en = '1' THEN
+                RAM(addr_int)     <= write_data(7 DOWNTO 0);
+                RAM(addr_int + 1) <= write_data(15 DOWNTO 8);
+                RAM(addr_int + 2) <= write_data(23 DOWNTO 16);
+                RAM(addr_int + 3) <= write_data(31 DOWNTO 24);
+            END IF;
         END IF;
     END PROCESS;
 
     -- Combinational read
-    -- TODO: reconstruct 32-bit word from four bytes in little-endian order
-    data <= -- your expression here
+    data <= RAM(addr_int + 3) &
+            RAM(addr_int + 2) &
+            RAM(addr_int + 1) &
+            RAM(addr_int);
 
 END ARCHITECTURE rtl;
