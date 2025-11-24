@@ -16,35 +16,39 @@ USE IEEE.NUMERIC_STD.ALL;
 
 ENTITY lw_sw_datapath IS
     PORT (
-        clock       : IN STD_LOGIC;
-        <dp_13>     : IN STD_LOGIC;
-        <dp_10>     : IN STD_LOGIC;
-        <dp_11>     : IN STD_LOGIC;
-        <dp_14>     : IN STD_LOGIC;
-        <dp_15>     : IN STD_LOGIC;
-        <dp_8>      : IN STD_LOGIC_VECTOR(2 DOWNTO 0);
-        <dp_12>     : IN STD_LOGIC_VECTOR(2 DOWNTO 0);
-        <dp_1>      : OUT STD_LOGIC_VECTOR(6 DOWNTO 0);
-        <dp_2>      : OUT STD_LOGIC_VECTOR(2 DOWNTO 0);
-        <dp_3>      : OUT STD_LOGIC;
-        zero_flag   : OUT STD_LOGIC;
-        out_data   : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+        clock        : IN STD_LOGIC;
+        mem_write    : IN STD_LOGIC;
+        reg_write    : IN STD_LOGIC;
+        alu_mux_sel  : IN STD_LOGIC;
+        ret_mux_sel  : IN STD_LOGIC;
+        out_buf_ctrl : IN STD_LOGIC;
+        imm_sel      : IN STD_LOGIC_VECTOR(2 DOWNTO 0);
+        alu_ctrl     : IN STD_LOGIC_VECTOR(2 DOWNTO 0);
+        branch       : IN STD_LOGIC;
+        opcode       : OUT STD_LOGIC_VECTOR(6 DOWNTO 0);
+        funct3       : OUT STD_LOGIC_VECTOR(2 DOWNTO 0);
+        funct7       : OUT STD_LOGIC;
+        zero_flag    : OUT STD_LOGIC;
+        out_data     : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
     );
 END ENTITY;
 
 ARCHITECTURE structural OF lw_sw_datapath IS
 
-    SIGNAL pc, pc_next                      : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
-    SIGNAL instruction, imm_ext, alu_result : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
-    SIGNAL rs1_data, rs2_data, rd_data      : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
-    SIGNAL result_mux_o                     : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
-    SIGNAL alu_mux_o                        : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
+    SIGNAL pc, pc_next, pc_plus_4, branch_target : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
+    SIGNAL instruction, imm_ext, alu_result      : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
+    SIGNAL rs1_data, rs2_data, rd_data           : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
+    SIGNAL result_mux_o                          : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
+    SIGNAL alu_mux_o                             : STD_LOGIC_VECTOR(31 DOWNTO 0) := (OTHERS => '0');
+    SIGNAL branch_taken                          : STD_LOGIC := '0';
 
 BEGIN
-    <dp_1>   <= instruction(6 DOWNTO 0);
-    <dp_2>   <= instruction(14 DOWNTO 12);
-    <dp_3>   <= instruction(30);
+    opcode   <= instruction(6 DOWNTO 0);
+    funct3   <= instruction(14 DOWNTO 12);
+    funct7   <= instruction(30);
 
+    branch_taken <= branch;
+    pc_next      <= branch_target WHEN branch_taken = '1' ELSE pc_plus_4;
 ------------------------------------------------------------------------
 -- FETCH BLOCK
 ------------------------------------------------------------------------
@@ -58,7 +62,14 @@ BEGIN
     dp_pc_adder : ENTITY work.pc_adder(structural)
         PORT MAP(
             pc_current => pc,
-            pc_next    => pc_next
+            pc_next    => pc_plus_4
+        );
+
+    dp_branch_adder : ENTITY work.adder_32(Behavioral)
+        PORT MAP(
+            op_a => pc,
+            op_b => imm_ext,
+            sum  => branch_target
         );
 
     dp_instr_mem : ENTITY work.instr_mem(rtl)
@@ -73,18 +84,21 @@ BEGIN
     dp_regfile : ENTITY work.register_file(behavioral)
         PORT MAP(
             clock    => clock,
-            rs1_addr => <dp_4>,
-            rs2_addr => <dp_5>,
-            rd_addr  => <dp_6>,
+            rs1_addr => instruction(19 DOWNTO 15),
+            rs2_addr => instruction(24 DOWNTO 20),
+            rd_addr  => instruction(11 DOWNTO 7),
             rd_data  => result_mux_o,
             rs1_data => rs1_data,
             rs2_data => rs2_data,
-            rd_we    => <dp_10>
+            rd_we    => reg_write
         );
 
-    -- TODO: Instantiate your immediate extension unit here.
-    --       Connect it to the 'instruction(31 DOWNTO 7)' input,
-    --       the 'imm_sel' control signal, and drive the 'imm_ext' output.
+    dp_imm_ext : ENTITY work.extension_unit(Behavioral)
+        PORT MAP(
+            din  => instruction(31 DOWNTO 7),
+            ctrl => imm_sel,
+            dout => imm_ext
+        );
 
 ------------------------------------------------------------------------
 -- EXECUTE & MEMORY BLOCK
@@ -94,14 +108,14 @@ BEGIN
             in0   => rs2_data,
             in1   => imm_ext,
             out_y => alu_mux_o,
-            sel   => <dp_11>
+            sel   => alu_mux_sel
         );
 
     dp_alu : ENTITY work.alu(behavioral)
         PORT MAP(
             src_a     => rs1_data,
             src_b     => alu_mux_o,
-            alu_ctrl  => <dp_12>,
+            alu_ctrl  => alu_ctrl,
             result    => alu_result,
             zero_flag => zero_flag
         );
@@ -112,7 +126,7 @@ BEGIN
             address    => alu_result,
             write_data => rs2_data,
             data       => rd_data,
-            write_en   => <dp_13>
+            write_en   => mem_write
         );
 
 ------------------------------------------------------------------------
@@ -123,12 +137,12 @@ BEGIN
             in0   => alu_result,
             in1   => rd_data,
             out_y => result_mux_o,
-            sel   => <dp_14>
+            sel   => ret_mux_sel
         );
 
     dp_tri_state_buffer: ENTITY work.tri_state_buffer(Behavioral)
         PORT MAP(
-            output_en => <dp_15>,
+            output_en    => out_buf_ctrl,
             buffer_input => result_mux_o,
             buffer_output=> out_data
         );
